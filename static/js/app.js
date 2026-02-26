@@ -33,6 +33,15 @@ class TechnicalTranslator {
             this.processUploadedFile();
         });
 
+        document.getElementById('historyBtn').addEventListener('click', () => {
+            this.showHistory();
+        });
+
+        document.getElementById('clearHistoryBtn').addEventListener('click', () => {
+            this.clearHistory();
+            this.showHistory();
+        });
+
         document.getElementById('sourceText').addEventListener('input', () => {
             this.updateWordCount();
         });
@@ -86,6 +95,17 @@ class TechnicalTranslator {
             if (response.ok) {
                 document.getElementById('translatedText').textContent = data.translated_text;
                 document.getElementById('translationTime').textContent = `${data.translation_time}s`;
+                
+                // Salva no histórico
+                this.saveToHistory({
+                    original: sourceText,
+                    translated: data.translated_text,
+                    sourceLang: sourceLanguage,
+                    targetLang: targetLanguage,
+                    timestamp: new Date().toISOString(),
+                    time: data.translation_time
+                });
+                
                 this.showAlert('Tradução concluída com sucesso!', 'success');
             } else {
                 throw new Error(data.error || 'Erro na tradução');
@@ -258,16 +278,131 @@ class TechnicalTranslator {
         };
         return icons[type] || 'info-circle';
     }
+
+    saveToHistory(translation) {
+        try {
+            let history = JSON.parse(localStorage.getItem('translationHistory') || '[]');
+            
+            // Adiciona no início
+            history.unshift(translation);
+            
+            // Mantém apenas os últimos 50 itens
+            if (history.length > 50) {
+                history = history.slice(0, 50);
+            }
+            
+            localStorage.setItem('translationHistory', JSON.stringify(history));
+        } catch (error) {
+            console.error('Erro ao salvar histórico:', error);
+        }
+    }
+
+    getHistory() {
+        try {
+            return JSON.parse(localStorage.getItem('translationHistory') || '[]');
+        } catch (error) {
+            console.error('Erro ao carregar histórico:', error);
+            return [];
+        }
+    }
+
+    clearHistory() {
+        if (confirm('Tem certeza que deseja limpar todo o histórico de traduções?')) {
+            localStorage.removeItem('translationHistory');
+            this.showAlert('Histórico limpo com sucesso!', 'success');
+        }
+    }
+
+    loadFromHistory(item) {
+        document.getElementById('sourceText').value = item.original;
+        document.getElementById('translatedText').textContent = item.translated;
+        document.getElementById('sourceLanguage').value = item.sourceLang;
+        document.getElementById('targetLanguage').value = item.targetLang;
+        document.getElementById('translationTime').textContent = `${item.time}s`;
+        this.updateWordCount();
+        
+        const modal = bootstrap.Modal.getInstance(document.getElementById('historyModal'));
+        modal.hide();
+        
+        this.showAlert('Tradução carregada do histórico!', 'info');
+    }
+
+    showHistory() {
+        const history = this.getHistory();
+        const historyList = document.getElementById('historyList');
+        
+        if (history.length === 0) {
+            historyList.innerHTML = '<p class="text-center text-muted">Nenhuma tradução no histórico</p>';
+            return;
+        }
+        
+        const languages = {
+            'pt': 'Português',
+            'en': 'Inglês',
+            'es': 'Espanhol',
+            'fr': 'Francês',
+            'de': 'Alemão',
+            'it': 'Italiano',
+            'ru': 'Russo',
+            'ja': 'Japonês',
+            'ko': 'Coreano',
+            'zh': 'Chinês',
+            'ar': 'Árabe',
+            'auto': 'Auto'
+        };
+        
+        historyList.innerHTML = history.map((item, index) => {
+            const date = new Date(item.timestamp);
+            const dateStr = date.toLocaleString('pt-BR');
+            const sourceLang = languages[item.sourceLang] || item.sourceLang;
+            const targetLang = languages[item.targetLang] || item.targetLang;
+            const preview = item.original.substring(0, 100) + (item.original.length > 100 ? '...' : '');
+            
+            return `
+                <div class="card mb-2 border-start border-4 border-primary">
+                    <div class="card-body p-3">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <small class="text-muted">
+                                    <i class="fas fa-exchange-alt me-1"></i>
+                                    ${sourceLang} → ${targetLang}
+                                </small>
+                                <br>
+                                <small class="text-muted">
+                                    <i class="fas fa-clock me-1"></i>
+                                    ${dateStr} • ${item.time}s
+                                </small>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary load-history-btn" data-index="${index}">
+                                <i class="fas fa-arrow-left me-1"></i>Carregar
+                            </button>
+                        </div>
+                        <p class="mb-0 small text-muted" style="max-height: 60px; overflow: hidden;">
+                            ${preview}
+                        </p>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        // Adiciona event listeners para os botões
+        historyList.querySelectorAll('.load-history-btn').forEach((btn, index) => {
+            btn.addEventListener('click', () => {
+                this.loadFromHistory(history[index]);
+            });
+        });
+    }
 }
 
+let translator;
+
 document.addEventListener('DOMContentLoaded', () => {
-    new TechnicalTranslator();
+    translator = new TechnicalTranslator();
     
     fetch('/health')
         .then(response => response.json())
         .then(data => {
             if (!data.azure_configured) {
-                const translator = new TechnicalTranslator();
                 translator.showAlert('Azure Translator não configurado. Verifique as variáveis de ambiente.', 'warning');
             }
         })
